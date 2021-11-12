@@ -1,0 +1,922 @@
+---
+title: "PRS Pipeline"
+author: "Jennifer Collister, Xiaonan Liu"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output: 
+  html_document:
+    df_print: paged
+    toc: true
+    toc_depth: 2
+    toc_float: true
+    code_folding: show
+    highlight: kate
+knit: (function(input_file, encoding) {
+  out_dir <- 'docs';
+  rmarkdown::render(input_file, encoding=encoding,
+  output_file=file.path(dirname(input_file), out_dir, 'index.html'))
+  })
+---
+
+```{r setup, include=FALSE}
+
+library(kableExtra)
+library(png)
+library(grid)
+library(fontawesome)
+library(DT)
+library(tidyverse)
+
+#---------------------------------------------------------------
+# Setup options
+
+# Set the root directory to the project directory (otherwise knitr works in the directory of the Rmd file by default)
+knitr::opts_knit$set(root.dir = here::here())
+
+# Set default chunk options
+knitr::opts_chunk$set(include=TRUE, echo=TRUE, eval=TRUE)
+
+```
+
+```{cat, engine.opts=list(file='demo.sh', append=FALSE)}
+
+#!/bin/bash
+
+```
+
+# Introduction
+
+This document describes the pipeline for computing an existing polygenic risk score (PRS) in **UK Biobank (UKB) imputed genotype data**, including the various quality control (QC) metrics that should be inspected. 
+
+We demonstrate the process using a PRS for low-density lipoprotein (LDL) cholesterol (LDL-C PRS) developed in [(Klarin et al. 2018)](https://www.nature.com/articles/s41588-018-0222-9). 
+
+The complete script produced by this pipeline is ['demo.sh'](https://github.com/2cjenn/PRS_Pipeline/blob/master/demo.sh).
+
+Data and software required are listed below:
+
+<div class="row">
+
+<div class="alert alert-info col-md-4 col-md-offset-1">
+
+<strong>Data</strong>
+
+<hr>
+[UKB Imputation data](https://biobank.ctsu.ox.ac.uk/crystal/crystal/docs/ukb_genetic_data_description.txt)
+
+[UKB Imputation MAF+info files](https://biobank.ctsu.ox.ac.uk/crystal/crystal/docs/ukb_genetic_data_description.txt)
+
+SNP list and betas for a PRS
+
+
+</div>
+
+<div class="alert alert-info col-md-4 col-md-offset-1">
+
+<strong>Software/Tools</strong>
+
+<hr>
+
+[bgenix](https://enkre.net/cgi-bin/code/bgen/wiki/bgenix) 
+
+[Cat-bgen](https://enkre.net/cgi-bin/code/bgen/doc/trunk/doc/wiki/cat-bgen.md)
+
+[SQLite](https://www.sqlite.org/index.html)
+
+[PLINK 2.0](www.cog-genomics.org/plink/2.0/)
+
+</div>
+
+</div>
+
+
+**Pre-requisite**: Researchers need to have access to UKB genetic data through an approved UK Biobank application.
+
+**Operating system**: The commands introduced below are written for **Linux and Mac OS operating systems**. 
+
+Additional online resources: 
+
+* [Assessing Genetic Data within UKB](https://biobank.ndph.ox.ac.uk/showcase/showcase/docs/ukbgene_instruct.html)
+* [Linux command](https://www.digitalocean.com/community/tutorials/basic-linux-navigation-and-file-management)
+* [Bash script](https://linuxconfig.org/bash-scripting-tutorial-for-beginners)
+* [awk](https://www.tim-dennis.com/data/tech/2016/08/09/using-awk-filter-rows.html)
+* [awk](https://www.gnu.org/software/gawk/manual/gawk.html)
+* [The AWK Programming Language](https://ia803404.us.archive.org/0/items/pdfy-MgN0H1joIoDVoIC7/The_AWK_Programming_Language.pdf)
+* [Tutorials on SQLite](https://www.sqlitetutorial.net/sqlite-commands/)
+* [Command Line Shell for SQLite](https://sqlite.org/cli.html)
+* [Shell tricks for one-liner bioinformatics](http://williamslab.bscb.cornell.edu/?page_id=235)
+
+**Structure**: We start by outlining how to use bgenix to quickly extract SNPs from the UK Biobank imputation data. Next we outline the commands needed to produce and filter on standard quality control metrics in PLINK 2, with particular attention to their suitability for imputed data. Finally we show how to compute PRS.
+
+# SNP Extraction
+
+## Betas.csv
+
+The Betas file is the per-SNP summary statistics for the PRS, including the list of SNPs in the PRS and their corresponding betas (effect sizes, or weightings). This information can typically be found in the supplementary materials of the paper where a PRS was derived or from online repositories such as [PGS Catalog](https://www.pgscatalog.org/).
+
+The first thing to do is ensure that the list of SNPs and betas is suitably formatted. Scores from online repositories may be consistently formatted according to a schema, but those from the supplementary materials of papers often have additional information in the form of header of footer rows, or may have been formatted in ways that can't easily be read by software tools. In this case, it is generally easier to manually arrange the betas into a suitable format than to try and tweak the code to read a particular niche layout you may never encounter again.
+
+For our working example, LDL-C PRS, the SNPs and betas were given in supplementary table 11 of [(Klarin et al. 2018)](https://www.nature.com/articles/s41588-018-0222-9). We checked that this PRS was developed using the same genome build as UKB (GRCh37), manually removed header rows and footnotes, ensured consistent formatting and saved the relevant information from the original Excel sheets (.xlsx) as 'Betas.csv'. 
+
+<div class="alert alert-warning w-50" role="alert">
+`r fontawesome::fa('lightbulb')`  **Tip:** We recommend saving the Betas file as .csv format because
+
+* Easier for visual inspection than .txt or similar
+* Isn't restricted by the [row limit of MS Excel](https://support.microsoft.com/en-us/office/excel-specifications-and-limits-1672b34d-7043-467e-8e27-269d656771c3#ID0EBABAAA=Newer_versions) for .xlsx files, which can become an issue when calculating PRS with millions of SNPs.
+</div>
+
+The first few rows of our example 'Betas.csv' file are shown below. 
+
+```{r, eval=TRUE, echo=FALSE}
+
+betas <- read.csv("inputs/Betas.csv")
+
+
+#kable(head(betas), "simple")
+#kable(test, "simple")
+betas %>%
+  datatable(rownames = FALSE,
+            extensions = 'Buttons',
+            options = list(dom = 'Blrtip',
+                           buttons = list(
+              list(
+                extend = 'csv',
+                text = 'Download Betas.csv',
+                action = DT::JS(
+                  "function (e, dt, node, config) {
+                  // Eventually process some data
+                  $.fn.dataTable.ext.buttons.csvHtml5.action.call(this, e, dt, node, config);
+                  }"
+                ))),
+                           lengthMenu = list(c(10,25,50,-1),
+                                             c(10,25,50,"All"))))
+
+
+
+betas$chrpos <- paste0(sprintf("%02d", betas$chr_name), ":", betas$chr_position, "-", betas$chr_position)
+
+```
+
+Where:
+
+* **rsid**: The Reference SNP cluster ID (rsID)
+* **chr_name**: The chromosome in which the SNP resides
+* **chr_position**: Chromosomal co-ordinate (position) of the SNP
+* **effect_allele**: The effect allele of the SNP
+* **reference_allele**: The reference allele of the SNP
+* **Beta**: The effect size estimate of the SNP
+* **eaf**: Effect allele frequency
+
+Note that the following code expects the columns to have these names and be arranged in this order.
+
+## List of SNP identifiers
+
+In order to extract these SNPs from the UKB genetic data using [bgenix](https://enkre.net/cgi-bin/code/bgen/wiki/bgenix), we need to make a file containing white-space separated SNP identifiers. 
+
+Bgenix expects either of the following:
+
+* a list of **rsID SNP identifiers** 
+* a list of **genomic ranges specified by chr:pos1-pos2**. Since we are interested in individual SNPs we can supply the position of each SNP as both the start and end of the range. Note that the chromosome number should be formatted to have two digits.
+
+We can use [`awk`](https://www.gnu.org/software/gawk/manual/gawk.html) to produce a list of rsID stored in 'rsidlist.txt' and chromosome position identifiers in the form `chr:pos1-pos2` stored in 'chrposlist.txt' from 'Betas.csv':
+
+```{cat, engine.opts=list(file='demo.sh', append=TRUE), class.source='bash'}
+
+awk -F, '{ if (NR>1) { print $1 }}' Betas.csv > rsidlist.txt
+
+awk -F, '{ if (NR>1) { print sprintf("%02d", $2)":"$3"-"$3 }}' Betas.csv > chrposlist.txt
+```
+
+Notes on the command: 
+
+* `-F,` informs `awk` the field separator is comma `,`
+* `NR` is an `awk` variable for the number of lines in the file. `if (NR>1)` means the command acts on all except the first line, skipping the header row
+* `$1` means the first field in the line, `$2` is the second and so on. This command therefore relies on the ordering of the columns in the file
+* `sprintf` returns a formatted string, in this case `sprintf("%02d", $2)` formats the values from column 2 to have 2 digits (i.e. leading zeroes for chromosomes 1-9)
+* `>` is the pipe operator, which redirects the output from `awk` (which would by default go to `stdout`) to the specified file
+
+Outputs would look like the following (both without header):
+
+<div class="row">
+
+<div class="alert alert-info col-md-4 col-md-offset-1">
+
+<strong>rsidlist.txt</strong>
+
+<hr>
+
+`r betas$rsid[1]`
+
+`r betas$rsid[2]`
+
+`r betas$rsid[3]`
+
+`r betas$rsid[4]`
+
+...
+
+</div>
+
+<div class="alert alert-info col-md-4 col-md-offset-1">
+
+<strong>chrposlist.txt</strong>
+
+<hr>
+
+`r betas$chrpos[1]`
+
+`r betas$chrpos[2]`
+
+`r betas$chrpos[3]`
+
+`r betas$chrpos[4]`
+
+...
+
+</div>
+
+</div>
+
+<div class="alert alert-danger" role="alert">
+`r fontawesome::fa('lightbulb')`  **Note**: Bgenix can only specify up to 9980 chr:position ranges in a query at a time. If more than 9980 variants are required, then either rsID identifiers must be used or the extraction must be split into multiple sections.
+</div>
+
+
+
+```{r, echo=FALSE}
+# https://stackoverflow.com/questions/47806200/create-a-comment-box-using-rmarkdown-html-file
+# https://stackoverflow.com/questions/20230251/bootstrap-alert-size-change
+# https://www.w3schools.com/bootstrap/bootstrap_grid_examples.asp
+```
+
+## Extract required SNPs
+
+We extract SNPs from UKB imputation data on **autosomes** (non-sex chromosomes), which are stored in [BGEN V1.2 format](https://www.well.ox.ac.uk/~gav/bgen_format/spec/v1.2.html) format (.bgen, .sample, .bgen.bgi): 
+
+* **ukb_imp_chrN_v3.bgen** (around 2TB per chromosome) stores the genotype probability data for all individuals, listed in the same order that they appear in the .sample file. This is a binary file (Not human readable).
+* **ukbA_imp_chrN_v3_sP.sample** (around 10MB) lists the order of the samples in the .bgen files and is identical across chromosomes. Due to the way UK Biobank allocates different pseudo-IDs to each approved application, this .sample file will be specific to the application and is used to link the genetic data to the phenotypic data.
+* **ukb_imp_chrN_v3.bgen.bgi** (around 4GB) index for the .bgen file.
+
+Where:
+
+* A = researchers UK Biobank application ID
+* N = chromosome = 1,...,22
+* P = number of consenting participants 
+
+The full description of these files can be found in [UK Biobank documentation](https://biobank.ctsu.ox.ac.uk/crystal/crystal/docs/ukb_genetic_data_description.txt).
+
+The process of SNP extraction is outlined in Figure 1:
+
+```{r structure, echo=FALSE,fig.cap='Figure 1: Structure of SNP extraction',fig.align='center',fig.width=15,fig.height=5}
+img1<-readPNG('K:\\TEU\\TechPRS\\Figures\\Extract_SNP.PNG')
+grid.raster(img1,width=0.8,height=1)
+
+```
+
+We iterate over the 22 autosome files in bash, using [bgenix](https://enkre.net/cgi-bin/code/bgen/doc/trunk/doc/wiki/bgenix.md) to extract the variants listed in 'rsidlist.txt' and/or 'chrposlist.txt' from each one. The extracted SNPs are saved as single-chromosome files, 'chr_N.bgen' where N = 1,...,22. 
+
+Then [cat-bgen](https://enkre.net/cgi-bin/code/bgen/doc/trunk/doc/wiki/cat-bgen.md) is used to concatenate the extracted data into one single file, here called 'initial_chr.bgen'. An index for this .bgen file, 'initial_chr.bgen.bgi' is created using bgenix for efficient access to specific variants.
+
+Finally, another bash loop deletes the intermediate single-chromosome files for tidiness. 
+
+```{cat, engine.opts=list(file='demo.sh', append=TRUE), class.source='bash'}
+
+cmd=""
+for i in {1..22}
+do
+  bgenix -g ukb_imp_chr${i}_v3.bgen -incl-rsids rsidlist.txt -incl-range chrposlist.txt > chr_${i}.bgen
+  cmd=$cmd"chr_${i}.bgen "
+done
+
+# Combine the .bgen files for each chromosome into one
+cat-bgen -g  $cmd -og initial_chr.bgen -clobber
+# Write index file .bgen.bgi
+bgenix -g initial_chr.bgen -index -clobber
+
+# Remove the individual chromosome files
+for i in {1..22}
+do
+  rm chr_${i}.bgen
+done
+```
+
+`r Sys.sleep(1)`
+
+Notes on Bash commands:
+
+* `{1..22}` produces a sequence of integers from 1 to 22 (bash version 3.0+ required)
+* `${i}` accesses the current value of the bash variable `i`
+* `cmd=$cmd"chr_${i}.bgen"` concatenates strings, in this case the names of the files so that at the end of the loop, `cmd` contains the names of all the files created
+* `rm` remove (delete) file
+
+Notes on bgenix options:
+
+* `-clobber` instructs bgenix and cat-bgen to overwrite this file if it already exists
+* `-index` creates a new index file from the specified .bgen file
+
+# SNP alignment and data conversion
+
+## Multi-allelic SNPs {#multiallelic}
+
+In the UK Biobank imputed data, multi-allelic SNPs are represented as multiple rows in the .bgen file, all with the same rsID, chromosome number and position. This means the rsID (or chromosome and position) is not sufficient to uniquely identify the variant.
+
+To visually inspect the data, use the `-list` command in bgenix, which prints a list of the variants in the file to stdout. A SNP with 3 alleles [A, C, G], for example, would be given by the following two rows:
+
+```{r, eval=TRUE, echo=FALSE}
+
+multi <- data.frame(alternate_ids=c("1:5678_A_G", "1:5678_C_G"),
+                    rsID=c("rs1234", "rs1234"), 
+                    chromosome=c(1, 1), 
+                    position=c(5678, 5678), 
+                    number_of_alleles=c(2, 2),
+                    first_allele=c("G", "G"),
+                    alternative_alleles=c("A", "C"))
+
+kable(multi, "simple")
+
+```
+
+The `alternate_id` column here is a unique identifier from UK Biobank that incorporates allele information where needed to provide a unique identifier for each row.
+
+<div class="alert alert-warning" role="alert">
+`r fontawesome::fa('lightbulb')`  **Note**: Although the UKB "alternate_id" is visible in the data when we use the `-list` command, we cannot filter the data by this ID.
+</div>
+
+Filtering our variants by rsID or chr:pos will extract (or exclude) *all* alleles of the corresponding multi-allelic SNP. In order to uniquely identify the alleles of interest we need to include allelic information in our filtering. Since the .bgen.bgi index file that corresponds to each .bgen file is actually a [sqlite3](http://www.sqlite.org) database file, we can open this file using sqlite3, and query it directly using the SQL database language.
+
+The index is stored in a table called Variants (to view the full schema, see the [bgenix index documentation](https://enkre.net/cgi-bin/code/bgen/wiki/The%20bgenix%20index%20file%20format)). By loading our table of SNPs into the database, and joining this to the Variants table on both the identifier (rsID, chr:pos or both) **and** the allele pairs, we can create a new table filtered to just the alleles of interest. 
+
+```{cat, engine.opts=list(file='demo.sh', append=TRUE), class.source='bash'}
+
+# Import the betas into the sqlite database as a table called Betas
+sqlite3 -separator "," initial_chr.bgen.bgi ".import Betas.csv Betas"
+
+# And inner join it to the index table (Variants), making a new table (Joined)
+# By joining on alleles as well as chromosome and position 
+# we can ensure only the relevant alleles from any multi-allelic SNPs are retained
+sqlite3 -header -csv initial_chr.bgen.bgi \
+"CREATE TABLE Joined AS 
+  SELECT Variant.* FROM Variant INNER JOIN Betas 
+    ON Variant.chromosome = printf('%02d', Betas.chr) 
+    AND Variant.position = Betas.pos 
+    AND Variant.allele1 = Betas.effect_allele 
+    AND Variant.allele2 = Betas.reference_allele 
+  UNION 
+  SELECT Variant.* FROM Variant INNER JOIN Betas 
+    ON Variant.chromosome = printf('%02d', Betas.chr) 
+    AND Variant.position = Betas.pos 
+    AND Variant.allele1 = Betas.reference_allele AND 
+    Variant.allele2 = Betas.effect_allele;"
+
+# Filter the .bgen file to include only the alleles specified in the Betas for each SNP 
+bgenix -g initial_chr.bgen -table Joined  > single_allelic.bgen
+
+# And produce an index file for the new .bgen
+bgenix -g single_allelic.bgen -index
+
+```
+
+`r Sys.sleep(1)`
+
+Notes on the SQL commands:
+
+* `CREATE TABLE Joined AS ...` creates a table called 'Joined' containing the data returned from the following query
+* `SELECT Variant.* FROM Variant` selects all columns from the Variant table (`*` is a wildcard)
+* `Variant.chromosome` selects the 'chromosome' column from the Variant table
+* `UNION` is used because we don't know if the allele labels (effect vs reference) will be consistent between our Betas.csv and the BGEN data
+
+And the bgenix commands:
+
+* `-table Joined` tells bgenix to output only the variants in the 'Joined' table
+
+## File Conversion
+
+While bgenix offers fast and simple variable extraction, it cannot be used for computation of summary statistics. We will describe how to use [PLINK 2](https://www.cog-genomics.org/plink/2.0/) for this, as after an initial data conversion step it is very fast and can compute statistics and apply filters in a single command. An alternative is QCTOOL, which does not require file conversion, but is much slower - for further details on how to compute summary statistics in QCTOOL, see [Appendix 1](#qctool)
+
+When PLINK 2 reads in a .bgen file it will [automatically convert](https://www.cog-genomics.org/plink/2.0/input#keep_autoconv) it to PLINK 2 binary format. For large data files, this can be time-consuming, so it is often faster to save the results of this conversion and run future PLINK 2 commands on the converted files, rather than performing file conversion again for each  operation.
+
+The PLINK 2 binary format is a set of three files:
+
+* .pgen: a binary file that contains individual identifiers (ID) and genotypes (not human readable)
+* .pvar: a text file contains information on the SNPs
+* .psam: a text file contains information on the individuals 
+
+A draft specification for these files is available in the [PLINK 2 GitHub repo](https://github.com/chrchang/plink-ng/tree/master/pgen_spec). Example .pvar and .psam files are displayed below. 
+
+```{r PLINK2 binary,echo=FALSE}
+
+pvar<-data.frame(CHROM=c(1,2,3),
+               POS=c(123456,234567,345678),
+               ID=c("1:123456","2:234567","3:345678"),
+               REF=c('G','T','C'),
+               ALT=c('T','G','T'))
+
+psam<-data.frame(FID=c(1,2,3),
+                 IID=c(1,2,3),
+                 SEX=c(1,2,2))
+
+kable(pvar,caption = "example.pvar") %>%
+  kable_styling(full_width = FALSE, position = "float_left")
+
+
+kable(psam,caption = "example.psam") %>%
+  kable_styling(full_width = FALSE, position = "center")
+```
+
+Where:
+
+* **CHROM**: chromosome
+* **POS**: position on chromosome
+* **ID**: SNP identifiers (Could be rsID, chr:pos, or other)
+* **REF**: Reference allele
+* **ALT**: alternate allele
+* **FID**: Family ID (note in UK Biobank there is no information on family, so family ID = individual ID)
+* **IID**: Individual ID
+* **SEX**: Sex of the individual
+
+For more information, see the [PLINK 2 documentation](https://www.cog-genomics.org/plink/2.0/input#pgen).
+
+<div class="alert alert-warning" role="alert"> `r fontawesome::fa('lightbulb')` **Note**:
+
+* **PLINK and Bgen**: PLINK 2 collapses the genotype probability triples stored in .bgen files down to allelic dosages (stored with 4 decimal place precision), which means this conversion is "lossy" or irreversible. For the calculation of polygenic risk scores, we are only interested in the dosages, and therefore this does not affect us. An example was given in PLINK 2 [google forum](https://groups.google.com/g/plink2-users/c/tc3VPcpFA6E/m/C4QjEOPCBQAJ) by Christopher Chang. 
+
+* **Hard-calls in PLINK 2**: In addition to allelic dosages, the PLINK 2 binary file format also records the hard-calls (calculated according to a given [hard-call threshold](https://www.cog-genomics.org/plink/2.0/input#dosage_import_settings)) because some of the PLINK 2's commands can only be used on hard-calls.
+
+</div>
+
+### Conversion
+
+Here we load the data from .bgen and .sample files, and convert it to PLINK 2 format. In addition, since we can supply multiple options to PLINK 2 in one command, we relabel the variant IDs to ensure they have unique identifiers, and print out an allele frequency report that we will use to identify ambiguous SNPs.
+
+<div class="alert alert-warning" role="alert"> `r fontawesome::fa('lightbulb')` **Sample file**:
+Note that although we have filtered to a subset of variants we still use our original .sample file, as our data still contains all the participants and they are arranged in the same order in the .bgen file.
+</div>
+
+```{cat, engine.opts = list(file = 'demo.sh', append=TRUE), class.source="bash"}
+
+plink2 --bgen single_allelic.bgen ref-first \
+--hard-call-threshold 0.1 \
+--sample ukbA_imp_chrN_v3_sP.sample \
+--memory 15000 \
+--set-all-var-ids @:#_\$r_\$a \
+--freq \
+--make-pgen \
+--out raw 
+
+```
+
+`r Sys.sleep(1)`
+
+Notes on the command:
+
+* `--bgen` and `--sample`: are how we specify the .bgen and .sample files we want to read in
+* `--hard-call-threshold`: this is a dosage import setting, that lets us specify the threshold value at which we want to define hard-calls. Here we have used the default threshold of 0.1
+* `--memory`: Manually specify memory usage, in this case to 15000MB
+* `--set-all-var-ids`: sets SNPs identifiers according to the specified template string, in this case chr:pos_ref_alt. See [PLINK 2 docs](https://www.cog-genomics.org/plink/2.0/data#set_all_var_ids) for more info
+* `--freq`: computes allele frequencies and outputs them to .afreq file
+* `--make-pgen`: generates files in PLINK 2 binary format
+* `--out`: specifies the prefix for all output files - here we have used 'raw'
+
+<div class="alert alert-warning" role="alert">
+`r fontawesome::fa('lightbulb')`  **Computational consideration**: When using a single node on a computing cluster, PLINK 2 can see all RAM on the cluster not only what's available in the nodes selected to run the job. In such cases, it can be necessary to manually specify the amount of memory PLINK 2 will use, or it may attempt to access more than permitted.
+</div>
+
+This command outputs the genetic data in PLINK 2 binary format (raw.pgen, raw.pvar, raw.psam), and an allele frequency report printed to **raw.afreq**.
+
+```{r PLINK2 afreq,echo=FALSE}
+
+afreq<-data.frame(CHROM=c(1,1,1),
+                  ID=c("1:1687482","1:2187085","1:3328659"),
+                  REF=c('G','T','C'),
+                  ALT=c('T','G','T'),
+                  ALT_FREQS=c(0.486,0.382,0.139),
+                  OBS_CT=c(974818,974818,974818))
+
+kable(afreq,caption = "raw.afreq") %>%
+  kable_styling(full_width = FALSE, position = "left")
+```
+
+Where:
+
+* **CHROM**: chromosome
+* **ID**: SNP identifier
+* **REF**: Reference allele
+* **ALT**: alternate allele
+* **ALT_FREQS**: Frequency of alternate allele
+* **OBS_CT**: Number of allele observations (note that this is 2 * number of individuals, since humans are diploid)
+
+## Ambiguous SNPs {#ambiguous}
+
+Having printed the list of allele frequencies, we can use `awk` to quickly identify palindromic SNPs (ie SNPs where both alleles are (A, T) or (C, G)) which have effect allele frequencies close enough to 0.5 that we cannot unambiguously distinguish between the effect and reference alleles. 
+
+In this case, we will consider "ambiguous" SNPs to be those with EAF between 0.49 and 0.51. 
+
+```{cat, engine.opts = list(file = 'demo.sh', append=TRUE), class.source="bash"}
+
+awk '/^[^#]/ { if( $5>0.49 && $5<0.51 && ( ($3=="A" && $4=="T") || ($4=="T" && $3=="A") || ($3=="C" && $4=="G") || ($4=="G" && $3=="C") ) ) { print $0 }}' \
+raw.afreq > exclrsIDs_ambiguous.txt
+
+```
+
+Notes on command: 
+
+* `/^[^#]/` instructs `awk` to ignore lines that start with #, as these are header lines or comments
+* `print $0` means print all fields in each line
+
+Later we will use the list we have printed here to exclude the ambiguous SNPs we have identified.
+
+# SNP QC
+
+```{cat, engine.opts = list(file = 'demo.sh', append=TRUE)}
+########################################################
+#----------------------- SNP QC -----------------------#
+########################################################
+```
+
+`r Sys.sleep(1)`
+
+It is good practice to perform some quality checks on the variants in our data before using them in analyses. 
+
+In the UK Biobank imputed data, there is no missing data since any missing calls have been imputed. The imputation quality of each variant is quantified by the imputation information, and variants with a low imputation information score (for example, \< 0.4) may be considered unreliable and removed from analyses. In addition, SNPs that are very rare and have low minor allele frequency (MAF) will not give adequate power to make meaningful statistical statements, and may be removed from analyses.
+
+## Imputation information {#imputeinfo}
+
+In order to filter on imputation information in PLINK 2, it is easiest to use a single file containing the imputation information score for each variant in the UK Biobank imputed data. 
+
+Here we achieve this by concatenating the UKB Imputation MAF+Info files (documented in [UKB Resource 531](https://biobank.ctsu.ox.ac.uk/crystal/refer.cgi?id=531)) using `awk`, adding in the chromosome number as the first column and the unique chr:pos_ref_alt identifier as the last column.
+
+Note that this command will only need to be run **once**, and all future work can use the resulting file.
+
+```{cat, engine.opts = list(file = 'demo.sh', append=TRUE), class.source="bash"}
+
+for i in {1..22}
+do
+  awk -v chr=$i 'BEGIN {FS="\t"; OFS="\t"} { print chr,$0,chr":"$3"_"$4"_"$5 }' \
+  ${IMPUTEPATH}/ukb_mfi_chr${i}_v3.txt
+done > ukb_mfi_all_v3.tsv
+
+```
+
+`r Sys.sleep(1)`
+
+Having produced a single tab-separated file containing the imputation information score for each variant, we can now use the `--extract-col-cond` flag in PLINK 2 to exclude any variants with imputation information below our chosen minimum value.
+
+## Minor allele frequency (MAF)
+
+We already saw that PLINK 2 can generate an allele frequency report - but instead of having to filter this with another software tool (eg `awk` or R) to produce a list of SNPs to exclude, we can apply a minor allele frequency threshold in a single PLINK 2 command: `--maf [minimum frequency]`
+
+## Filter SNPs
+
+Finally, we can apply all these exclusions in one command:
+
+```{cat, engine.opts = list(file = 'demo.sh', append=TRUE), class.source="bash"}
+
+plink2 --pfile raw \
+--memory 15000 \
+--exclude exclrsIDs_ambiguous.txt \
+--extract-col-cond ukb_mfi_all_v3.tsv 9 10 --extract-col-cond-min 0.4 \
+--maf 0.005 \
+--write-snplist \
+--make-pgen \
+--out snpQC 
+
+```
+
+`r Sys.sleep(1)`
+
+Notes on command: 
+
+* `--exclude` takes a list of variant IDs and excludes them. In this case, we have supplied the list of [ambiguous SNPs](#ambiguous) we identified earlier.
+* `--extract-col-cond` takes the name of the tab-separated file containing the scores, the column number to condition on and the column number of the variant IDs. We specify the minimum value using `--extract-col-cond-min` (see [Plink documentation](https://www.cog-genomics.org/plink/2.0/filter#extract_col_cond)). In this case, we are excluding SNPs with [imputation information](#imputeinfo) less than 0.4, using the ukb_mfi_all_v3.tsv file we created previously.
+* `--maf` will exclude variants with minor allele frequency less than the specified value, in this case 0.005
+
+The outputs of the command above are: 
+
+* **snpQC.pgen, snpQC.psam, snpQC.pvar**: Data after SNP QC (excpet HWE) in PLINK 2 binary format
+* **snpQC.snplist**: List of IDs of SNPs that passed QC with the specified thresholds (from `--write-snplist`)
+
+# Sample QC
+
+```{cat, engine.opts = list(file = 'demo.sh', append=TRUE)}
+########################################################
+#--------------------- Sample QC ----------------------#
+########################################################
+```
+
+`r Sys.sleep(1)`
+
+Typically, participants with poor quality genotyping data are also excluded from genetic analyses.
+
+The UK Biobank provides a field ([Field 22020](https://biobank.ndph.ox.ac.uk/showcase/field.cgi?id=22020)) which indicates whether an individual met their internal quality control checks for inclusion in the calculation of principal components, and we have saved the IDs of such individuals in a text file called "usedinpca.txt".
+
+This field restricts to individuals who:
+
+-   Have missing rate in autosomes $\le$ 0.02
+
+-   Are not outliers for missingness or heterozygosity
+
+-   Are in a maximal set of unrelated individuals
+
+-   Are not sex-discordant
+
+as detailed in [Bycroft2018](https://www.nature.com/articles/s41586-018-0579-z#MOESM1) [Supplementary Materials](https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-018-0579-z/MediaObjects/41586_2018_579_MOESM1_ESM.pdf)
+
+It is common for analysis of UK Biobank data to use this pre-curated selection of participants, so for straightforward sample QC we just keep individuals recorded in 'usedinpca.txt'.
+
+```{cat, engine.opts=list(file='demo.sh', append=TRUE), class.source='bash'}
+
+plink2 --pfile raw \
+--memory 15000 \
+--extract snpQC.snplist \
+--keep-fam usedinpca.txt \
+--write-samples \
+--out sampleQC 
+
+```
+
+`r Sys.sleep(1)`
+
+<div class="alert alert-danger w-50" role="alert">
+`r fontawesome::fa('lightbulb')`  **Note:** 
+
+* We use `--keep-fam` because our list of IDs has only one column, so PLINK 2 thinks they are family IDs. If we provided a file with two columns, then PLINK 2 would read the first column as the family ID and the second as the individual ID - in this case, to filter based on individual IDs we would use `--keep`. In the UK Biobank, there is no family information, so the family and individual IDs are identical.
+
+* We run SNP QC and sample QC in separate commands due to the default [order of operation in PLINK 2](https://www.cog-genomics.org/plink/2.0/order). If we put SNP and sample QC in the same command, PLINK 2 would run our sample QC (`--keep-fam`) before SNP QC (e.g. `--maf`, `--geno`,...), which is not what we want.
+</div>
+
+The output is **sampleQC.id** (from `--write-samples`) which contains the resulting individual IDs and family IDs (i.e. same format as the first 2 columns of 'raw.psam').
+
+```{r sampleQC,echo=FALSE,eval=FALSE}
+
+kable(psam[,-3],caption = "sampleQC.id") %>%
+  kable_styling(full_width = FALSE, position = "float_right")
+
+```
+
+
+# Calculate the PRS
+
+```{cat, engine.opts = list(file = 'demo.sh', append=TRUE)}
+########################################################
+#----------------- Calculate the PRS ------------------#
+########################################################
+```
+
+`r Sys.sleep(1)`
+
+
+The formula for computing PRS for individual $j$, $PRS_{j}$ is specified below: 
+
+$$PRS_{j}=\displaystyle \frac{\sum_{i=1}^{N} {\beta_{i}*dosage_{ij}}}{P*M_{j}}$$
+
+where:
+
+* $\beta_{i}$ is the effect size of SNP $i$ for $i \in {1,...,N}$
+* $dosage_{ij}$ is the allelic dosage of the effect allele in SNP $i$ for individual $j$
+* $P$ is the ploidy, which is 2 in this case because humans are diploid (and we're only considering autosomes)
+* $M_{j}$ stands for the number of non-missing SNPs observed in individual $j$.
+
+
+<div class="alert alert-warning w-50" role="alert">
+`r fontawesome::fa('lightbulb')`  **Note:** 
+
+* In the UKB imputed data, any missing calls were imputed and so there is no missing data and $M_{j}=N \; \forall \; j$
+* In genotyping data where missing calls have not been imputed, each individual could have different values of $M_{j}$
+</div>
+
+To compute PRS in PLINK 2, we need to rearrange the SNPs and betas from the Betas.csv file into the format the PLINK 2 [`--score`](https://www.cog-genomics.org/plink/2.0/score) command expects.
+
+We need to have whitespace-separated columns in the following order (with no header):
+
+1. variant ID
+2. effect allele
+3. beta
+
+We will use chr:pos_ref_alt identifiers as variant IDs, as this is what we used in the .pgen file. In order to be sure that the IDs match those in our data, with the ref and alt alleles labelled the same way round, we will extract the SNPs and betas from the 'Joined' table we created in the .bgen.bgi index file [earlier](#multiallelic).
+
+```{cat, engine.opts = list(file = 'demo.sh', append=TRUE), class.source="bash"}
+
+sqlite3 "" <<EndOfSqlite3Commands
+.mode list
+.separator ' '
+ATTACH 'initial_chr.bgen.bgi' AS db;
+.output score.txt
+SELECT chr_name || ':' || position || '_' ||allele1 || '_' || allele2, allele2, Beta FROM Joined;
+EndOfSqlite3Commands
+
+```
+
+`r Sys.sleep(1)`
+
+Once we have prepared the score.txt file we can run the `--score` command in PLINK 2.
+
+```{cat, engine.opts = list(file = 'demo.sh', append=TRUE), class.source="bash"}
+
+plink2 --pfile raw \
+--memory 15000 \
+--extract snpQC.snplist \
+--keep sampleQC.id \
+--score score.txt no-mean-imputation \
+--out PRS
+
+```
+
+`r Sys.sleep(1)`
+
+Notes on the command:
+
+* For our input data, we only includes SNPs (`--extract`) and samples (`--keep`) that passed our QC. 
+* Then we calculate the score (`--score`) with betas stored in 'score.txt' and specify `no-mean-imputation` option to scale each individual's score according to the number of non-missing SNPs without imputing missing SNPs.
+
+The output is **PRS.sscore** which takes the following form:
+
+```{r sscore,echo=FALSE}
+
+sscore<-data.frame(FID=c(1,2,3),
+                   IID=c(1,2,3),
+                   NMISS_ALLELE_CT=c(446, 446, 446),
+                   NAMED_ALLELE_DOSAGE_SUM=c(221.369,294.455,214.173),
+                   SCORE1_AVG=c(-0.001,-0.001,0.001))
+
+kable(sscore,caption = "PRS.sscore") %>%
+  kable_styling(full_width = FALSE, position = "center")
+
+```
+
+Where for each individual:
+
+* **NMISS_ALLELE_CT** is the number of non-missing alleles across scored variants ($P * M_{j}$ from our PRS equation)
+* **NAMED_ALLELE_DOSAGE_SUM** is the **un-weighted** sum of effect allele dosages (i.e. $\sum_{i=1}^{N} dosage_{ij}$ without $\beta$s) 
+* **SCORE1_AVG** is the PRS score, standardised by the number of SNPs in the score (i.e. $PRS_{j}$)
+
+<div class="alert alert-danger w-50" role="alert">
+`r fontawesome::fa('exclamation')`  **Note:** PLINK 2 may throw the following warning: "warning: X --score file entries were skipped due to missing variant IDs".
+
+This might be fine, since the betas file (and therefore the score.txt file) may contain some SNPs that were removed in QC, or unavailable in the UK Biobank data. If these numbers don't align, then something might have gone wrong!
+</div>
+
+# Software versions used
+
+Linux OS, Intel CPU on computing cluster.
+
+* bgenix v1.1.1
+* cat-bgen v1.1.1
+* PLINK v2.00a2.3
+* SQLite v3.29.0
+* QCTOOL v2.0.1
+
+
+# Appendices {.tabset}
+
+## A1. Quality control in QCTOOL {#qctool}
+
+[QCTOOL](https://www.well.ox.ac.uk/~gav/qctool_v2/index.html) can also be used to compute the per-variant and per-sample QC metrics and filter data. While QCTOOL can handle imputed data better in some ways (eg can be used to compute the imputation information score) is is very slow for large data sets.
+
+```{bash, eval=FALSE}
+
+# Produce the SNP summary statistics
+qctool -g initial_chr.bgen -filetype bgen -snp-stats -osnp snps-info-initial.txt
+# Produce the sample summary statistics
+qctool -g initial_chr.bgen -filetype bgen -s ukbA_imp_chrN_v3_sP.sample -sample-stats -osample sample-info-initial.txt
+
+```
+
+Although QCTOOL can compute these statistics it cannot directly filter on them, so any desired filters (eg impute info < 0.4) must be applied using another software tool, such as `awk` or R.
+
+```{bash, eval=FALSE}
+
+# Produce the SNP summary statistics
+qctool -g initial_chr.bgen -filetype bgen -s ukbA_imp_chrN_v3_sP.sample -os outputs/mace/sampleQC.sample -incl-samples usedinpca.txt -incl-rsids outputs/mace/exclHWErsIDs.txt
+
+
+```
+
+## A2. Linkage disequilibrium {#ld}
+
+Linkage disequilibrium is a measure of the correlation between neighbouring genetic variants, .
+
+Typically, during the construction of a PRS, variants in high LD will have been identified and removed by methods such as clumping and pruning.
+
+In order to verify this, or apply more stringent thresholds, the PLINK 2 command `--indep-pairwise` can be used to prune the data, resulting in a subset of variants with LD below a specified threshold.
+
+```{bash, eval=FALSE}
+
+plink2 --pfile raw \
+--memory 15000 \
+--indep-pairwise 200 1 0.3 \
+--out ld 
+
+```
+
+The command is described in more detail in the [PLINK 2 documentation](https://www.cog-genomics.org/plink/2.0/ld), but in brief:
+
+* the first parameter is the window size in variant counts, here we have specified 200
+* the second parameter is the variant count by which to shift the window, we have specified 1 which is the default
+* the third parameter is the r^2^ threshold above which to exclude SNPs, here we are using 0.3
+
+This command will output a pair of variant ID lists, one containing variants to be kept (below specified LD threshold) and one containing variants to be removed. 
+
+For more detailed investigation of LD, including pairwise comparison reports or identification of "tag" variants, we recommend PLINK 1.9.
+
+
+## A3. Hardy-Weinberg Equilibrium (HWE) {#hwe}
+
+The UK Biobank population is predominantly White (around 95% of participants self-reported white ethnicity). Since Hardy-Weinberg Equilbrium is sensitive to population structure and we may expect to see differences in SNP frequency by ethnicity, we wish to restrict to White British participants prior to testing for HWE.
+
+In internal QC, [Bycroft2018](https://www.nature.com/articles/s41586-018-0579-z#MOESM1) used principal components analysis to determine the genetic ethnicity of participants, and identified those who self-reported as "White British" and had very similar ancestral backgrounds.
+
+UK Biobank provided a field ([Field 22006](https://biobank.ndph.ox.ac.uk/showcase/field.cgi?id=22006)) indicating individuals who were categorised as genetically "White British", and we have saved the IDs of these individuals in a text file called "whitebrit.txt".
+
+
+```{bash, eval=FALSE}
+
+plink2 --pfile raw \
+--memory 15000 \
+--extract snpQC.snplist \
+--keep sampleQC.id \
+--keep-fam whitebrit.txt \
+--hwe 0.000001 midp \
+--write-snplist \
+--out HWE 
+
+```
+
+Note on the command: 
+
+* Restrict samples to 
+  * those that passed sample QC (`--keep sampleQC.id`)
+  * those identified as "White British" ethnic group (`--keep-fam whitebrit.txt`)
+* `--hwe 0.000001 midp` filter out SNPs that have HWE exact test p-value less than the chosen threshold (in this case 10^-6^) with `midp` modifier which is recommended in the [Plink docs](https://www.cog-genomics.org/plink/2.0/filter#hwe).
+
+The output is **HWE.snplist** which contains a list of SNP IDs that have passed HWE criteria.
+
+## A4. Using variables to avoid typing filepaths in bash {#bashfilepath}
+
+In these demo code chunks we have assumed all files are within the same working directory, to simplify the code chunks and avoid imposing our ideas of how to organise the files.
+
+If you wish to access files in other locations, you can prespecify the filepaths once at the beginning of the script as a bash variable
+
+```{bash, eval=FALSE}
+
+UKBDATAPATH="path/to/data/"
+
+```
+
+Note that there is no whitespace around the `=` sign.
+
+You can then use this bash variable as a shorthand to avoid repeatedly typing out long paths, for example:
+
+```{bash, eval=FALSE}
+
+bgenix -g ${UKBDATAPATH}ukb_imp_chr1_v3.bgen -incl-rsids rsidlist.txt -incl-range chrposlist.txt > chr_1.bgen
+
+```
+
+An additional benefit is that if you ever wish to change the path where the data is stored, you only need to update it once where the bash variable is defined.
+
+```{js, echo=FALSE}
+// Chunk of javascript to enable internal links to tabs, and recursive opening of nested tabs
+
+// Provided by Thomas Boby, MBRRACE, NPEU
+
+$(document).on("click", "a", function (e) {
+
+  if ($(this).attr("href") === "#") {
+
+    e.preventDefault();
+
+    return;
+
+  }
+
+  var hash = this.href.split('#')[1];
+
+  if (hash) {
+
+    var link = $('.nav-tabs a[href="#' + hash + '"]');
+
+    link.tab('show');
+
+    //Find parent tab and show
+
+    var parentID = link.parents(".tab-pane").attr('id');
+
+    $('.nav-tabs a[href="#' + parentID + '"]').tab('show');  
+
+  }
+})
+```
+
+```{js, echo=FALSE}
+// Chunk of javascript to automatically add "target="_blank" to external links so they open in new tabs
+// From https://yihui.org/en/2018/09/target-blank/
+
+(function() {
+  var links = document.getElementsByTagName('a');
+  for (var i = 0; i < links.length; i++) {
+    if (/^(https?:)?\/\//.test(links[i].getAttribute('href'))) {
+      links[i].target = '_blank';
+    }
+  }
+})();
+
+```
+
