@@ -36,12 +36,12 @@ sqlite3 -header -csv initial_chr.bgen.bgi \
     ON Variant.chromosome = printf('%02d', Betas.chr) 
     AND Variant.position = Betas.pos 
     AND Variant.allele1 = Betas.effect_allele 
-    AND Variant.allele2 = Betas.reference_allele 
+    AND Variant.allele2 = Betas.noneffect_allele 
   UNION 
   SELECT Variant.* FROM Variant INNER JOIN Betas 
     ON Variant.chromosome = printf('%02d', Betas.chr) 
     AND Variant.position = Betas.pos 
-    AND Variant.allele1 = Betas.reference_allele AND 
+    AND Variant.allele1 = Betas.noneffect_allele AND 
     Variant.allele2 = Betas.effect_allele;"
 
 # Filter the .bgen file to include only the alleles specified in the Betas for each SNP 

@@ -167,7 +167,7 @@ Where:
 * **chr_name**: The chromosome in which the SNP resides
 * **chr_position**: Chromosomal co-ordinate (position) of the SNP
 * **effect_allele**: The effect allele of the SNP
-* **reference_allele**: The reference allele of the SNP
+* **noneffect_allele**: The non-effect allele of the SNP
 * **Beta**: The effect size estimate of the SNP
 * **eaf**: Effect allele frequency
 
@@ -364,12 +364,12 @@ sqlite3 -header -csv initial_chr.bgen.bgi \
     ON Variant.chromosome = printf('%02d', Betas.chr) 
     AND Variant.position = Betas.pos 
     AND Variant.allele1 = Betas.effect_allele 
-    AND Variant.allele2 = Betas.reference_allele 
+    AND Variant.allele2 = Betas.noneffect_allele 
   UNION 
   SELECT Variant.* FROM Variant INNER JOIN Betas 
     ON Variant.chromosome = printf('%02d', Betas.chr) 
     AND Variant.position = Betas.pos 
-    AND Variant.allele1 = Betas.reference_allele AND 
+    AND Variant.allele1 = Betas.noneffect_allele AND 
     Variant.allele2 = Betas.effect_allele;"
 
 # Filter the .bgen file to include only the alleles specified in the Betas for each SNP 
@@ -387,7 +387,7 @@ Notes on the SQL commands:
 * `CREATE TABLE Joined AS ...` creates a table called 'Joined' containing the data returned from the following query
 * `SELECT Variant.* FROM Variant` selects all columns from the Variant table (`*` is a wildcard)
 * `Variant.chromosome` selects the 'chromosome' column from the Variant table
-* `UNION` is used because we don't know if the allele labels (effect vs reference) will be consistent between our Betas.csv and the BGEN data
+* `UNION` is used because we don't know if the allele labels (effect vs non-effect) will be consistent between our Betas.csv and the BGEN data
 
 And the bgenix commands:
 
@@ -433,7 +433,7 @@ Where:
 * **POS**: position on chromosome
 * **ID**: SNP identifiers (Could be rsID, chr:pos, or other)
 * **REF**: Reference allele
-* **ALT**: alternate allele
+* **ALT**: Alternate allele
 * **FID**: Family ID (note in UK Biobank there is no information on family, so family ID = individual ID)
 * **IID**: Individual ID
 * **SEX**: Sex of the individual
@@ -505,13 +505,13 @@ Where:
 * **CHROM**: chromosome
 * **ID**: SNP identifier
 * **REF**: Reference allele
-* **ALT**: alternate allele
+* **ALT**: Alternate allele
 * **ALT_FREQS**: Frequency of alternate allele
 * **OBS_CT**: Number of allele observations (note that this is 2 * number of individuals, since humans are diploid)
 
 ## Ambiguous SNPs {#ambiguous}
 
-Having printed the list of allele frequencies, we can use `awk` to quickly identify palindromic SNPs (ie SNPs where both alleles are (A, T) or (C, G)) which have effect allele frequencies close enough to 0.5 that we cannot unambiguously distinguish between the effect and reference alleles. 
+Having printed the list of allele frequencies, we can use `awk` to quickly identify palindromic SNPs (ie SNPs where both alleles are (A, T) or (C, G)) which have effect allele frequencies close enough to 0.5 that we cannot unambiguously distinguish between the effect and non-effect alleles. 
 
 In this case, we will consider "ambiguous" SNPs to be those with EAF between 0.4 and 0.6. 
 

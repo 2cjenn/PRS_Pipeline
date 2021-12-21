@@ -1,4 +1,4 @@
-rsid,chr_name,chr_position,effect_allele,reference_allele,Beta,eaf,chr_pos
+rsid,chr_name,chr_position,effect_allele,noneffect_allele,Beta,eaf,chr_pos
 rs6511720,19,11202306,T,G,-0.211427,0.1075,19:11202306
 rs4420638,19,45422946,G,A,0.16801,0.1797,19:45422946
 rs629301,1,109818306,T,G,0.157518,0.7742,1:109818306
