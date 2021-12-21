@@ -513,11 +513,11 @@ Where:
 
 Having printed the list of allele frequencies, we can use `awk` to quickly identify palindromic SNPs (ie SNPs where both alleles are (A, T) or (C, G)) which have effect allele frequencies close enough to 0.5 that we cannot unambiguously distinguish between the effect and reference alleles. 
 
-In this case, we will consider "ambiguous" SNPs to be those with EAF between 0.49 and 0.51. 
+In this case, we will consider "ambiguous" SNPs to be those with EAF between 0.4 and 0.6. 
 
 ```{cat, engine.opts = list(file = 'demo.sh', append=TRUE), class.source="bash"}
 
-awk '/^[^#]/ { if( $5>0.49 && $5<0.51 && ( ($3=="A" && $4=="T") || ($4=="T" && $3=="A") || ($3=="C" && $4=="G") || ($4=="G" && $3=="C") ) ) { print $0 }}' \
+awk '/^[^#]/ { if( $5>0.4 && $5<0.6 && ( ($3=="A" && $4=="T") || ($4=="T" && $3=="A") || ($3=="C" && $4=="G") || ($4=="G" && $3=="C") ) ) { print $0 }}' \
 raw.afreq > exclrsIDs_ambiguous.txt
 
 ```
