@@ -32,13 +32,13 @@ sqlite3 -separator "," initial_chr.bgen.bgi ".import Betas.csv Betas"
 # we can ensure only the relevant alleles from any multi-allelic SNPs are retained
 sqlite3 -header -csv initial_chr.bgen.bgi \
 "CREATE TABLE Joined AS 
-  SELECT Variant.* FROM Variant INNER JOIN Betas 
+  SELECT Variant.*, Betas.chr_name, -Betas.Beta AS Beta FROM Variant INNER JOIN Betas 
     ON Variant.chromosome = printf('%02d', Betas.chr) 
     AND Variant.position = Betas.pos 
     AND Variant.allele1 = Betas.effect_allele 
     AND Variant.allele2 = Betas.noneffect_allele 
   UNION 
-  SELECT Variant.* FROM Variant INNER JOIN Betas 
+  SELECT Variant.*, Betas.chr_name, Betas.Beta AS Beta FROM Variant INNER JOIN Betas 
     ON Variant.chromosome = printf('%02d', Betas.chr) 
     AND Variant.position = Betas.pos 
     AND Variant.allele1 = Betas.noneffect_allele AND 
