@@ -401,6 +401,18 @@
       "Repository": "CRAN",
       "Hash": "bd48a6f2a7902156d2a905c94d2529a6"
     },
+    "klippy": {
+      "Package": "klippy",
+      "Version": "0.0.0.9500",
+      "Source": "GitHub",
+      "RemoteType": "github",
+      "RemoteHost": "api.github.com",
+      "RemoteUsername": "rlesur",
+      "RemoteRepo": "klippy",
+      "RemoteRef": "master",
+      "RemoteSha": "378c247fbbc76ec662f6c1ed1103121b87091be4",
+      "Hash": "f5fe274cc67ff811dd6eab9aa7b383bf"
+    },
     "knitr": {
       "Package": "knitr",
       "Version": "1.30",
