@@ -711,10 +711,6 @@ sqlite3 -separator " " -list initial_chr.bgen.bgi \
 
 ```
 
-Note on command:
-
-* Here we are submitting multiple commands to sqlite in one go. 
-
 `r Sys.sleep(1)`
 
 Once we have prepared the score.txt file we can run the `--score` command in PLINK 2.
