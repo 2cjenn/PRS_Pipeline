@@ -101,13 +101,8 @@ plink2 --pfile raw \
 #----------------- Calculate the PRS ------------------#
 ########################################################
 
-sqlite3 "" <<EndOfSqlite3Commands
-.mode list
-.separator ' '
-ATTACH 'initial_chr.bgen.bgi' AS db;
-.output score.txt
-SELECT chr_name || ':' || position || '_' ||allele1 || '_' || allele2, allele2, Beta FROM Joined;
-EndOfSqlite3Commands
+sqlite3 -separator " " -list initial_chr.bgen.bgi \
+"SELECT chr_name || ':' || position || '_' ||allele1 || '_' || allele2, allele2, Beta FROM Joined;" > score.txt
 
 
 plink2 --pfile raw \

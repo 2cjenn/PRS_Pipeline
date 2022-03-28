@@ -706,22 +706,14 @@ We will use chr:pos_ref_alt identifiers as variant IDs, as this is what we used 
 
 ```{cat, engine.opts = list(file = 'demo.sh', append=TRUE), class.source="bash"}
 
-sqlite3 "" <<EndOfSqlite3Commands
-.mode list
-.separator ' '
-ATTACH 'initial_chr.bgen.bgi' AS db;
-.output score.txt
-SELECT chr_name || ':' || position || '_' ||allele1 || '_' || allele2, allele2, Beta FROM Joined;
-EndOfSqlite3Commands
+sqlite3 -separator " " -list initial_chr.bgen.bgi \
+"SELECT chr_name || ':' || position || '_' ||allele1 || '_' || allele2, allele2, Beta FROM Joined;" > score.txt
 
 ```
 
 Note on command:
 
-* The `<<EndOfSqlite3Commands ... EndOfSqlite3Commands` syntax is a bash feature called 'here-documents' (see [docs](https://tldp.org/LDP/abs/html/here-docs.html)) 
-* The list of commands between the `EndOfSqlite3Commands` delimiters is redirected to the sqlite program. 
-* This means this code chunk can be run in a script, as it doesn't trigger the sqlite interactive mode.
-* If you would prefer to enter interactive mode and run these commands one by one, just skip the `EndOfSqlite3Commands` delimiters
+* Here we are submitting multiple commands to sqlite in one go. 
 
 `r Sys.sleep(1)`
 
