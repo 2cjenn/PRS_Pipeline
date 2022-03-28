@@ -353,8 +353,10 @@ The index is stored in a table called Variants (to view the full schema, see the
 ```{cat, engine.opts=list(file='demo.sh', append=TRUE), class.source='bash'}
 
 # Import the betas into the sqlite database as a table called Betas
+sqlite3 initial_chr.bgen.bgi "DROP TABLE IF EXISTS Betas;"
 sqlite3 -separator "," initial_chr.bgen.bgi ".import Betas.csv Betas"
 
+sqlite3 initial_chr.bgen.bgi "DROP TABLE IF EXISTS Joined;"
 # And inner join it to the index table (Variants), making a new table (Joined)
 # By joining on alleles as well as chromosome and position 
 # we can ensure only the relevant alleles from any multi-allelic SNPs are retained
@@ -384,9 +386,11 @@ bgenix -g single_allelic.bgen -index
 
 Notes on the SQL commands:
 
+* `DROP TABLE IF EXISTS Betas;` Will drop (delete) the table if it already exists, otherwise we will get an error when we attempt to create it
+* `.import Betas.csv Betas` imports the data from the file Betas.csv into a table called 'Betas'
 * `CREATE TABLE Joined AS ...` creates a table called 'Joined' containing the data returned from the following query
-* `SELECT Variant.* FROM Variant` selects all columns from the Variant table (`*` is a wildcard)
-* `Variant.chromosome` selects the 'chromosome' column from the Variant table
+* `SELECT Variant.*` selects all columns from the Variant table (`*` is a wildcard)
+* `Betas.chr_name` selects the 'chr_name' column from the Betas table
 * `UNION` is used because we don't know if the allele labels (effect vs non-effect) will be consistent between our Betas.csv and the BGEN data
 
 And the bgenix commands:

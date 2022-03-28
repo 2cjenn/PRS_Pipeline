@@ -25,8 +25,10 @@ do
 done
 
 # Import the betas into the sqlite database as a table called Betas
+sqlite3 initial_chr.bgen.bgi "DROP TABLE IF EXISTS Betas;"
 sqlite3 -separator "," initial_chr.bgen.bgi ".import Betas.csv Betas"
 
+sqlite3 initial_chr.bgen.bgi "DROP TABLE IF EXISTS Joined;"
 # And inner join it to the index table (Variants), making a new table (Joined)
 # By joining on alleles as well as chromosome and position 
 # we can ensure only the relevant alleles from any multi-allelic SNPs are retained
@@ -64,9 +66,8 @@ plink2 --bgen single_allelic.bgen ref-first \
 awk '/^[^#]/ { if( $5>0.4 && $5<0.6 && ( ($3=="A" && $4=="T") || ($4=="T" && $3=="A") || ($3=="C" && $4=="G") || ($4=="G" && $3=="C") ) ) { print $0 }}' \
 raw.afreq > exclrsIDs_ambiguous.txt
 
-########################################################
-#----------------------- SNP QC -----------------------#
-########################################################
+
+######################################################
 
 for i in {1..22}
 do
