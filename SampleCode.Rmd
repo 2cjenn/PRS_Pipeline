@@ -798,7 +798,7 @@ To run these you will need to do one of the following:
 * Have the executable in your working directory, and use `./`
   * eg `./sqlite3  -separator "," initial_chr.bgen.bgi ".import Betas.csv Betas"`
   
-  ## A2. Using variables to avoid typing filepaths in bash {#bashfilepath}
+## A2. Using variables to avoid typing filepaths in bash {#bashfilepath}
 
 In these demo code chunks we have assumed all files are within the same working directory, to simplify the code chunks and avoid imposing our ideas of how to organise the files.
 
