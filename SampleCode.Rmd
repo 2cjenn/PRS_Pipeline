@@ -53,7 +53,7 @@ klippy::klippy(all_precode =TRUE,
 
 # Introduction
 
-This document describes the pipeline for computing an existing polygenic risk score (PRS) in **UK Biobank (UKB) imputed genotype data**, including the various quality control (QC) metrics that should be inspected. 
+This document accompanies our paper, [Calculating Polygenic Risk Scores (PRS) in UK Biobank: A Practical Guide for Epidemiologists](https://doi.org/10.3389/fgene.2022.818574), and describes the pipeline for computing an existing polygenic risk score (PRS) in **UK Biobank (UKB) imputed genotype data**, including the various quality control (QC) metrics that should be inspected.
 
 We demonstrate the process using a PRS for low-density lipoprotein (LDL) cholesterol (LDL-C PRS) developed in [(Klarin et al. 2018)](https://www.nature.com/articles/s41588-018-0222-9). 
 
