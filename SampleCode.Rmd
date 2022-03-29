@@ -25,6 +25,7 @@ library(grid)
 library(fontawesome)
 library(DT)
 library(tidyverse)
+library(klippy)
 
 #---------------------------------------------------------------
 # Setup options
@@ -35,6 +36,13 @@ knitr::opts_knit$set(root.dir = here::here())
 # Set default chunk options
 knitr::opts_chunk$set(include=TRUE, echo=TRUE, eval=TRUE)
 
+```
+
+```{r klippy, echo=FALSE, include=TRUE}
+# Add copy-to-clipboard buttons to code chunks
+klippy::klippy(all_precode =TRUE,
+               position = c("top", "right"),
+               color="darkgreen")
 ```
 
 ```{cat, engine.opts=list(file='demo.sh', append=FALSE)}
