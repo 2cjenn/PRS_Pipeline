@@ -323,7 +323,7 @@ Notes on bgenix options:
 
 # SNP alignment and data conversion
 
-## Multi-allelic SNPs {#multiallelic}
+## Multi-allelic SNPs and alignment {#multiallelic}
 
 In the UK Biobank imputed data, multi-allelic SNPs are represented as multiple rows in the .bgen file, all with the same rsID, chromosome number and position. This means the rsID (or chromosome and position) is not sufficient to uniquely identify the variant.
 
@@ -351,7 +351,13 @@ The `alternate_id` column here is a unique identifier from UK Biobank that incor
 
 Filtering our variants by rsID or chr:pos will extract (or exclude) *all* alleles of the corresponding multi-allelic SNP. In order to uniquely identify the alleles of interest we need to include allelic information in our filtering. Since the .bgen.bgi index file that corresponds to each .bgen file is actually a [sqlite3](http://www.sqlite.org) database file, we can open this file using sqlite3, and query it directly using the SQL database language.
 
-The index is stored in a table called Variants (to view the full schema, see the [bgenix index documentation](https://enkre.net/cgi-bin/code/bgen/wiki/The%20bgenix%20index%20file%20format)). By loading our table of SNPs into the database, and joining this to the Variants table on both the identifier (rsID, chr:pos or both) **and** the allele pairs, we can create a new table filtered to just the alleles of interest. 
+The index is stored in a table called Variants (to view the full schema, see the [bgenix index documentation](https://enkre.net/cgi-bin/code/bgen/wiki/The%20bgenix%20index%20file%20format)). By loading our table of SNPs into the database, and joining this to the Variants table on both the identifier (rsID, chr:pos or both) **and** the allele pairs, we can create a new table filtered to just the alleles of interest.
+
+When doing this we need to take into account the alignment of the SNPs. We know that the UK Biobank data is aligned to GrCh37, with the first allele in the bgen files ('allele1' column) the reference allele on the forwards strand. Our betas file, on the other hand, has the alleles labelled as effect and noneffect - and this labelling might be determined by which allele is more common, or has a particular direction of assocation with the trait of interest.
+
+For this reason, when we do our join in SQL, we can't just assume that all our effect alleles will be in the same column of the index file. To account for this, we use two join statements, one that matches up variants where 'allele1' is our noneffect allele (and 'allele2' is our effect), and one with the opposite alignment. Notice that we flip the sign of the beta on one of these joins, as discussed in Section 2.4.1 of our companion paper.
+
+We then take the union of these two joins in order to get a single table with all our variants, where we have aligned the allele labelling such that our effect allele is the one in the 'allele2' column.
 
 ```{cat, engine.opts=list(file='demo.sh', append=TRUE), class.source='bash'}
 
@@ -365,17 +371,17 @@ sqlite3 initial_chr.bgen.bgi "DROP TABLE IF EXISTS Joined;"
 # we can ensure only the relevant alleles from any multi-allelic SNPs are retained
 sqlite3 -header -csv initial_chr.bgen.bgi \
 "CREATE TABLE Joined AS 
-  SELECT Variant.*, Betas.chr_name, -Betas.Beta FROM Variant INNER JOIN Betas 
-    ON Variant.chromosome = printf('%02d', Betas.chr_name) 
-    AND Variant.position = Betas.chr_position 
-    AND Variant.allele1 = Betas.effect_allele 
-    AND Variant.allele2 = Betas.noneffect_allele 
-  UNION 
   SELECT Variant.*, Betas.chr_name, Betas.Beta FROM Variant INNER JOIN Betas 
     ON Variant.chromosome = printf('%02d', Betas.chr_name) 
     AND Variant.position = Betas.chr_position 
-    AND Variant.allele1 = Betas.noneffect_allele AND 
-    Variant.allele2 = Betas.effect_allele;"
+    AND Variant.allele1 = Betas.noneffect_allele 
+    AND Variant.allele2 = Betas.effect_allele 
+  UNION 
+  SELECT Variant.*, Betas.chr_name, -Betas.Beta FROM Variant INNER JOIN Betas 
+    ON Variant.chromosome = printf('%02d', Betas.chr_name) 
+    AND Variant.position = Betas.chr_position 
+    AND Variant.allele1 = Betas.effect_allele AND 
+    Variant.allele2 = Betas.noneffect_allele;"
 
 # Filter the .bgen file to include only the alleles specified in the Betas for each SNP 
 bgenix -g initial_chr.bgen -table Joined  > single_allelic.bgen
@@ -394,7 +400,7 @@ Notes on the SQL commands:
 * `CREATE TABLE Joined AS ...` creates a table called 'Joined' containing the data returned from the following query
 * `SELECT Variant.*` selects all columns from the Variant table (`*` is a wildcard)
 * `Betas.chr_name` selects the 'chr_name' column from the Betas table
-* `UNION` is used because we don't know if the allele labels (effect vs non-effect) will be consistent between our Betas.csv and the BGEN data
+* `printf('%02d', Betas.chr_name)` formats the chromosome number from the Betas table to be two digits, with a leading zero if necessary, to match the format in the Variant table
 
 And the bgenix commands:
 
@@ -703,7 +709,9 @@ We need to have whitespace-separated columns in the following order (with no hea
 2. effect allele
 3. beta
 
-We will use chr:pos_ref_alt identifiers as variant IDs, as this is what we used in the .pgen file. In order to be sure that the IDs match those in our data, with the ref and alt alleles labelled the same way round, we will extract the SNPs and betas from the 'Joined' table we created in the .bgen.bgi index file [earlier](#multiallelic).
+We will use chr:pos_ref_alt identifiers as variant IDs, as this is what we used in the .pgen file. In order to be sure that the IDs match those in our data, with the effect and noneffect alleles labelled the same way round, we will extract the SNPs and betas from the 'Joined' table we created in the .bgen.bgi index file [earlier](#multiallelic).
+
+Recall that we decided to align this table with noneffect alleles in the 'allele1' column, and effect alleles in 'allele2'.
 
 ```{cat, engine.opts = list(file = 'demo.sh', append=TRUE), class.source="bash"}
 
@@ -711,6 +719,10 @@ sqlite3 -separator " " -list initial_chr.bgen.bgi \
 "SELECT chr_name || ':' || position || '_' ||allele1 || '_' || allele2, allele2, Beta FROM Joined;" > score.txt
 
 ```
+
+Note on command:
+
+* `||` is the concatenation operator in SQL - we are using it to construct the unique variant ID by concatenating chr:pos_eff_neff
 
 `r Sys.sleep(1)`
 

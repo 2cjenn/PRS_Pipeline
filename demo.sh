@@ -34,17 +34,17 @@ sqlite3 initial_chr.bgen.bgi "DROP TABLE IF EXISTS Joined;"
 # we can ensure only the relevant alleles from any multi-allelic SNPs are retained
 sqlite3 -header -csv initial_chr.bgen.bgi \
 "CREATE TABLE Joined AS 
-  SELECT Variant.*, Betas.chr_name, -Betas.Beta FROM Variant INNER JOIN Betas 
-    ON Variant.chromosome = printf('%02d', Betas.chr_name) 
-    AND Variant.position = Betas.chr_position 
-    AND Variant.allele1 = Betas.effect_allele 
-    AND Variant.allele2 = Betas.noneffect_allele 
-  UNION 
   SELECT Variant.*, Betas.chr_name, Betas.Beta FROM Variant INNER JOIN Betas 
     ON Variant.chromosome = printf('%02d', Betas.chr_name) 
     AND Variant.position = Betas.chr_position 
-    AND Variant.allele1 = Betas.noneffect_allele AND 
-    Variant.allele2 = Betas.effect_allele;"
+    AND Variant.allele1 = Betas.noneffect_allele 
+    AND Variant.allele2 = Betas.effect_allele 
+  UNION 
+  SELECT Variant.*, Betas.chr_name, -Betas.Beta FROM Variant INNER JOIN Betas 
+    ON Variant.chromosome = printf('%02d', Betas.chr_name) 
+    AND Variant.position = Betas.chr_position 
+    AND Variant.allele1 = Betas.effect_allele AND 
+    Variant.allele2 = Betas.noneffect_allele;"
 
 # Filter the .bgen file to include only the alleles specified in the Betas for each SNP 
 bgenix -g initial_chr.bgen -table Joined  > single_allelic.bgen
