@@ -72,8 +72,7 @@ raw.afreq > exclrsIDs_ambiguous.txt
 
 for i in {1..22}
 do
-  awk -v chr=$i 'BEGIN {FS="\t"; OFS="\t"} { print chr,$0,chr":"$3"_"$4"_"$5 }' \
-  ${IMPUTEPATH}/ukb_mfi_chr${i}_v3.txt
+  awk -v chr=$i 'BEGIN {FS="\t"; OFS="\t"} { print chr,$0,chr":"$3"_"$4"_"$5 }' ukb_mfi_chr${i}_v3.txt
 done > ukb_mfi_all_v3.tsv
 
 
