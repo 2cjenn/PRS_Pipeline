@@ -355,7 +355,7 @@ The index is stored in a table called Variants (to view the full schema, see the
 
 When doing this we need to take into account the alignment of the SNPs. We know that the UK Biobank data is aligned to GrCh37, with the first allele in the bgen files ('allele1' column) the reference allele on the forwards strand. Our betas file, on the other hand, has the alleles labelled as effect and noneffect - and this labelling might be determined by which allele is more common, or has a particular direction of assocation with the trait of interest.
 
-For this reason, when we do our join in SQL, we can't just assume that all our effect alleles will be in the same column of the index file. To account for this, we use two join statements, one that matches up variants where 'allele1' is our noneffect allele (and 'allele2' is our effect), and one with the opposite alignment. Notice that we flip the sign of the beta on one of these joins, as discussed in Section 2.4.1 of our companion paper.
+For this reason, when we do our join in SQL, we can't just assume that all our effect alleles will be in the same column of the index file. To account for this, we use two join statements, one that matches up variants where 'allele1' is our noneffect allele (and 'allele2' is our effect), and one with the opposite alignment. Notice that we flip the sign of the beta on the second join, as discussed in Section 2.4.1 of our companion paper.
 
 We then take the union of these two joins in order to get a single table with all our variants, where we have aligned the allele labelling such that our effect allele is the one in the 'allele2' column.
 
