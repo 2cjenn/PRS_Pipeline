@@ -98,7 +98,9 @@ SNP list and betas for a PRS
 
 **Pre-requisite**: Researchers need to have access to UKB genetic data through an approved UK Biobank application.
 
-**Operating system**: The commands introduced below are written for **Linux and Mac OS operating systems**. 
+**Operating system**: The commands introduced below are written for **Linux and Mac OS operating systems**.
+
+Please note that we attempt to be path-agnostic throughout this tutorial. See [Appendix 1](#exe) for details on how to run command line programs, and [Appendix 2](#bashfilepath) for tips on managing filepaths using variables to reduce typo risk.
 
 Additional online resources: 
 
@@ -321,7 +323,7 @@ Notes on bgenix options:
 
 # SNP alignment and data conversion
 
-## Multi-allelic SNPs {#multiallelic}
+## Multi-allelic SNPs and alignment {#multiallelic}
 
 In the UK Biobank imputed data, multi-allelic SNPs are represented as multiple rows in the .bgen file, all with the same rsID, chromosome number and position. This means the rsID (or chromosome and position) is not sufficient to uniquely identify the variant.
 
@@ -349,29 +351,37 @@ The `alternate_id` column here is a unique identifier from UK Biobank that incor
 
 Filtering our variants by rsID or chr:pos will extract (or exclude) *all* alleles of the corresponding multi-allelic SNP. In order to uniquely identify the alleles of interest we need to include allelic information in our filtering. Since the .bgen.bgi index file that corresponds to each .bgen file is actually a [sqlite3](http://www.sqlite.org) database file, we can open this file using sqlite3, and query it directly using the SQL database language.
 
-The index is stored in a table called Variants (to view the full schema, see the [bgenix index documentation](https://enkre.net/cgi-bin/code/bgen/wiki/The%20bgenix%20index%20file%20format)). By loading our table of SNPs into the database, and joining this to the Variants table on both the identifier (rsID, chr:pos or both) **and** the allele pairs, we can create a new table filtered to just the alleles of interest. 
+The index is stored in a table called Variants (to view the full schema, see the [bgenix index documentation](https://enkre.net/cgi-bin/code/bgen/wiki/The%20bgenix%20index%20file%20format)). By loading our table of SNPs into the database, and joining this to the Variants table on both the identifier (rsID, chr:pos or both) **and** the allele pairs, we can create a new table filtered to just the alleles of interest.
+
+When doing this we need to take into account the alignment of the SNPs. We know that the UK Biobank data is aligned to GrCh37, with the first allele in the bgen files ('allele1' column) the reference allele on the forwards strand. Our betas file, on the other hand, has the alleles labelled as effect and noneffect - and this labelling might be determined by which allele is more common, or has a particular direction of assocation with the trait of interest.
+
+For this reason, when we do our join in SQL, we can't just assume that all our effect alleles will be in the same column of the index file. To account for this, we use two join statements, one that matches up variants where 'allele1' is our noneffect allele (and 'allele2' is our effect), and one with the opposite alignment. Notice that we flip the sign of the beta on the second join, as discussed in Section 2.4.1 of our companion paper.
+
+We then take the union of these two joins in order to get a single table with all our variants, where we have aligned the allele labelling such that our effect allele is the one in the 'allele2' column.
 
 ```{cat, engine.opts=list(file='demo.sh', append=TRUE), class.source='bash'}
 
 # Import the betas into the sqlite database as a table called Betas
+sqlite3 initial_chr.bgen.bgi "DROP TABLE IF EXISTS Betas;"
 sqlite3 -separator "," initial_chr.bgen.bgi ".import Betas.csv Betas"
 
+sqlite3 initial_chr.bgen.bgi "DROP TABLE IF EXISTS Joined;"
 # And inner join it to the index table (Variants), making a new table (Joined)
 # By joining on alleles as well as chromosome and position 
 # we can ensure only the relevant alleles from any multi-allelic SNPs are retained
 sqlite3 -header -csv initial_chr.bgen.bgi \
 "CREATE TABLE Joined AS 
-  SELECT Variant.* FROM Variant INNER JOIN Betas 
+  SELECT Variant.*, Betas.chr_name, Betas.Beta FROM Variant INNER JOIN Betas 
     ON Variant.chromosome = printf('%02d', Betas.chr_name) 
     AND Variant.position = Betas.chr_position 
-    AND Variant.allele1 = Betas.effect_allele 
-    AND Variant.allele2 = Betas.noneffect_allele 
+    AND Variant.allele1 = Betas.noneffect_allele 
+    AND Variant.allele2 = Betas.effect_allele 
   UNION 
-  SELECT Variant.* FROM Variant INNER JOIN Betas 
+  SELECT Variant.*, Betas.chr_name, -Betas.Beta FROM Variant INNER JOIN Betas 
     ON Variant.chromosome = printf('%02d', Betas.chr_name) 
     AND Variant.position = Betas.chr_position 
-    AND Variant.allele1 = Betas.noneffect_allele AND 
-    Variant.allele2 = Betas.effect_allele;"
+    AND Variant.allele1 = Betas.effect_allele AND 
+    Variant.allele2 = Betas.noneffect_allele;"
 
 # Filter the .bgen file to include only the alleles specified in the Betas for each SNP 
 bgenix -g initial_chr.bgen -table Joined  > single_allelic.bgen
@@ -385,10 +395,12 @@ bgenix -g single_allelic.bgen -index
 
 Notes on the SQL commands:
 
+* `DROP TABLE IF EXISTS Betas;` Will drop (delete) the table if it already exists, otherwise we will get an error when we attempt to create it
+* `.import Betas.csv Betas` imports the data from the file Betas.csv into a table called 'Betas'
 * `CREATE TABLE Joined AS ...` creates a table called 'Joined' containing the data returned from the following query
-* `SELECT Variant.* FROM Variant` selects all columns from the Variant table (`*` is a wildcard)
-* `Variant.chromosome` selects the 'chromosome' column from the Variant table
-* `UNION` is used because we don't know if the allele labels (effect vs non-effect) will be consistent between our Betas.csv and the BGEN data
+* `SELECT Variant.*` selects all columns from the Variant table (`*` is a wildcard)
+* `Betas.chr_name` selects the 'chr_name' column from the Betas table
+* `printf('%02d', Betas.chr_name)` formats the chromosome number from the Betas table to be two digits, with a leading zero if necessary, to match the format in the Variant table
 
 And the bgenix commands:
 
@@ -396,7 +408,7 @@ And the bgenix commands:
 
 ## File Conversion
 
-While bgenix offers fast and simple variable extraction, it cannot be used for computation of summary statistics. We will describe how to use [PLINK 2](https://www.cog-genomics.org/plink/2.0/) for this, as after an initial data conversion step it is very fast and can compute statistics and apply filters in a single command. An alternative is QCTOOL, which does not require file conversion, but is much slower - for further details on how to compute summary statistics in QCTOOL, see [Appendix 1](#qctool)
+While bgenix offers fast and simple variable extraction, it cannot be used for computation of summary statistics. We will describe how to use [PLINK 2](https://www.cog-genomics.org/plink/2.0/) for this, as after an initial data conversion step it is very fast and can compute statistics and apply filters in a single command. An alternative is QCTOOL, which does not require file conversion, but is much slower - for further details on how to compute summary statistics in QCTOOL, see [Appendix 3](#qctool)
 
 When PLINK 2 reads in a .bgen file it will [automatically convert](https://www.cog-genomics.org/plink/2.0/input#keep_autoconv) it to PLINK 2 binary format. For large data files, this can be time-consuming, so it is often faster to save the results of this conversion and run future PLINK 2 commands on the converted files, rather than performing file conversion again for each  operation.
 
@@ -556,8 +568,7 @@ Note that this command will only need to be run **once**, and all future work ca
 
 for i in {1..22}
 do
-  awk -v chr=$i 'BEGIN {FS="\t"; OFS="\t"} { print chr,$0,chr":"$3"_"$4"_"$5 }' \
-  ${IMPUTEPATH}/ukb_mfi_chr${i}_v3.txt
+  awk -v chr=$i 'BEGIN {FS="\t"; OFS="\t"} { print chr,$0,chr":"$3"_"$4"_"$5 }' ukb_mfi_chr${i}_v3.txt
 done > ukb_mfi_all_v3.tsv
 
 ```
@@ -697,19 +708,20 @@ We need to have whitespace-separated columns in the following order (with no hea
 2. effect allele
 3. beta
 
-We will use chr:pos_ref_alt identifiers as variant IDs, as this is what we used in the .pgen file. In order to be sure that the IDs match those in our data, with the ref and alt alleles labelled the same way round, we will extract the SNPs and betas from the 'Joined' table we created in the .bgen.bgi index file [earlier](#multiallelic).
+We will use chr:pos_ref_alt identifiers as variant IDs, as this is what we used in the .pgen file. In order to be sure that the IDs match those in our data, with the effect and noneffect alleles labelled the same way round, we will extract the SNPs and betas from the 'Joined' table we created in the .bgen.bgi index file [earlier](#multiallelic).
+
+Recall that we decided to align this table with noneffect alleles in the 'allele1' column, and effect alleles in 'allele2'.
 
 ```{cat, engine.opts = list(file = 'demo.sh', append=TRUE), class.source="bash"}
 
-sqlite3 "" <<EndOfSqlite3Commands
-.mode list
-.separator ' '
-ATTACH 'initial_chr.bgen.bgi' AS db;
-.output score.txt
-SELECT chr_name || ':' || position || '_' ||allele1 || '_' || allele2, allele2, Beta FROM Joined;
-EndOfSqlite3Commands
+sqlite3 -separator " " -list initial_chr.bgen.bgi \
+"SELECT chr_name || ':' || position || '_' ||allele1 || '_' || allele2, allele2, Beta FROM Joined;" > score.txt
 
 ```
+
+Note on command:
+
+* `||` is the concatenation operator in SQL - we are using it to construct the unique variant ID by concatenating chr:pos_eff_neff
 
 `r Sys.sleep(1)`
 
@@ -773,7 +785,44 @@ Linux OS, Intel CPU on computing cluster.
 
 # Appendices {.tabset}
 
-## A1. Quality control in QCTOOL {#qctool}
+## A1. Running command line programs {#exe}
+
+Throughout this tutorial we have assumed that all the required tools (eg bgenix, sqlite3, plink) are on your `PATH` to avoid any considerations of which directory the executables are located in.
+
+To run these you will need to do one of the following:
+
+* Add the executable to your local `$PATH` variable and then just use the tool name
+  * eg `export PATH=$PATH:/place/with/sqlite/executable` then `sqlite3  -separator "," initial_chr.bgen.bgi ".import Betas.csv Betas"`
+* Specify the full path to the executable when running the command
+  * eg `/path/to/sqlite3  -separator "," initial_chr.bgen.bgi ".import Betas.csv Betas"`
+* Have the executable in your working directory, and use `./`
+  * eg `./sqlite3  -separator "," initial_chr.bgen.bgi ".import Betas.csv Betas"`
+  
+## A2. Using variables to avoid typing filepaths in bash {#bashfilepath}
+
+In these demo code chunks we have assumed all files are within the same working directory, to simplify the code chunks and avoid imposing our ideas of how to organise the files.
+
+If you wish to access files in other locations, you can prespecify the filepaths once at the beginning of the script as a bash variable
+
+```{bash, eval=FALSE}
+
+UKBDATAPATH="path/to/data/"
+
+```
+
+Note that there is no whitespace around the `=` sign.
+
+You can then use this bash variable as a shorthand to avoid repeatedly typing out long paths, for example:
+
+```{bash, eval=FALSE}
+
+bgenix -g ${UKBDATAPATH}ukb_imp_chr1_v3.bgen -incl-rsids rsidlist.txt -incl-range chrposlist.txt > chr_1.bgen
+
+```
+
+An additional benefit is that if you ever wish to change the path where the data is stored, you only need to update it once where the bash variable is defined.
+
+## A3. Quality control in QCTOOL {#qctool}
 
 [QCTOOL](https://www.well.ox.ac.uk/~gav/qctool_v2/index.html) can also be used to compute the per-variant and per-sample QC metrics and filter data. While QCTOOL can handle imputed data better in some ways (eg can be used to compute the imputation information score) is is very slow for large data sets.
 
@@ -796,7 +845,7 @@ qctool -g initial_chr.bgen -filetype bgen -s ukbA_imp_chrN_v3_sP.sample -os outp
 
 ```
 
-## A2. Linkage disequilibrium {#ld}
+## A4. Linkage disequilibrium {#ld}
 
 Linkage disequilibrium is a measure of the correlation between neighbouring genetic variants, .
 
@@ -824,7 +873,7 @@ This command will output a pair of variant ID lists, one containing variants to 
 For more detailed investigation of LD, including pairwise comparison reports or identification of "tag" variants, we recommend PLINK 1.9.
 
 
-## A3. Hardy-Weinberg Equilibrium (HWE) {#hwe}
+## A5. Hardy-Weinberg Equilibrium (HWE) {#hwe}
 
 The UK Biobank population is predominantly White (around 95% of participants self-reported white ethnicity). Since Hardy-Weinberg Equilbrium is sensitive to population structure and we may expect to see differences in SNP frequency by ethnicity, we wish to restrict to White British participants prior to testing for HWE.
 
@@ -854,30 +903,6 @@ Note on the command:
 * `--hwe 0.000001 midp` filter out SNPs that have HWE exact test p-value less than the chosen threshold (in this case 10^-6^) with `midp` modifier which is recommended in the [Plink docs](https://www.cog-genomics.org/plink/2.0/filter#hwe).
 
 The output is **HWE.snplist** which contains a list of SNP IDs that have passed HWE criteria.
-
-## A4. Using variables to avoid typing filepaths in bash {#bashfilepath}
-
-In these demo code chunks we have assumed all files are within the same working directory, to simplify the code chunks and avoid imposing our ideas of how to organise the files.
-
-If you wish to access files in other locations, you can prespecify the filepaths once at the beginning of the script as a bash variable
-
-```{bash, eval=FALSE}
-
-UKBDATAPATH="path/to/data/"
-
-```
-
-Note that there is no whitespace around the `=` sign.
-
-You can then use this bash variable as a shorthand to avoid repeatedly typing out long paths, for example:
-
-```{bash, eval=FALSE}
-
-bgenix -g ${UKBDATAPATH}ukb_imp_chr1_v3.bgen -incl-rsids rsidlist.txt -incl-range chrposlist.txt > chr_1.bgen
-
-```
-
-An additional benefit is that if you ever wish to change the path where the data is stored, you only need to update it once where the bash variable is defined.
 
 ```{js, echo=FALSE}
 // Chunk of javascript to enable internal links to tabs, and recursive opening of nested tabs

@@ -25,24 +25,26 @@ do
 done
 
 # Import the betas into the sqlite database as a table called Betas
+sqlite3 initial_chr.bgen.bgi "DROP TABLE IF EXISTS Betas;"
 sqlite3 -separator "," initial_chr.bgen.bgi ".import Betas.csv Betas"
 
+sqlite3 initial_chr.bgen.bgi "DROP TABLE IF EXISTS Joined;"
 # And inner join it to the index table (Variants), making a new table (Joined)
 # By joining on alleles as well as chromosome and position 
 # we can ensure only the relevant alleles from any multi-allelic SNPs are retained
 sqlite3 -header -csv initial_chr.bgen.bgi \
 "CREATE TABLE Joined AS 
-  SELECT Variant.* FROM Variant INNER JOIN Betas 
+  SELECT Variant.*, Betas.chr_name, Betas.Beta FROM Variant INNER JOIN Betas 
     ON Variant.chromosome = printf('%02d', Betas.chr_name) 
     AND Variant.position = Betas.chr_position 
-    AND Variant.allele1 = Betas.effect_allele 
-    AND Variant.allele2 = Betas.noneffect_allele 
+    AND Variant.allele1 = Betas.noneffect_allele 
+    AND Variant.allele2 = Betas.effect_allele 
   UNION 
-  SELECT Variant.* FROM Variant INNER JOIN Betas 
+  SELECT Variant.*, Betas.chr_name, -Betas.Beta FROM Variant INNER JOIN Betas 
     ON Variant.chromosome = printf('%02d', Betas.chr_name) 
     AND Variant.position = Betas.chr_position 
-    AND Variant.allele1 = Betas.noneffect_allele AND 
-    Variant.allele2 = Betas.effect_allele;"
+    AND Variant.allele1 = Betas.effect_allele AND 
+    Variant.allele2 = Betas.noneffect_allele;"
 
 # Filter the .bgen file to include only the alleles specified in the Betas for each SNP 
 bgenix -g initial_chr.bgen -table Joined  > single_allelic.bgen
@@ -70,8 +72,7 @@ raw.afreq > exclrsIDs_ambiguous.txt
 
 for i in {1..22}
 do
-  awk -v chr=$i 'BEGIN {FS="\t"; OFS="\t"} { print chr,$0,chr":"$3"_"$4"_"$5 }' \
-  ${IMPUTEPATH}/ukb_mfi_chr${i}_v3.txt
+  awk -v chr=$i 'BEGIN {FS="\t"; OFS="\t"} { print chr,$0,chr":"$3"_"$4"_"$5 }' ukb_mfi_chr${i}_v3.txt
 done > ukb_mfi_all_v3.tsv
 
 
@@ -99,13 +100,8 @@ plink2 --pfile raw \
 #----------------- Calculate the PRS ------------------#
 ########################################################
 
-sqlite3 "" <<EndOfSqlite3Commands
-.mode list
-.separator ' '
-ATTACH 'initial_chr.bgen.bgi' AS db;
-.output score.txt
-SELECT chr_name || ':' || position || '_' ||allele1 || '_' || allele2, allele2, Beta FROM Joined;
-EndOfSqlite3Commands
+sqlite3 -separator " " -list initial_chr.bgen.bgi \
+"SELECT chr_name || ':' || position || '_' ||allele1 || '_' || allele2, allele2, Beta FROM Joined;" > score.txt
 
 
 plink2 --pfile raw \
